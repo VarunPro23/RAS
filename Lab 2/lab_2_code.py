@@ -6,7 +6,7 @@ for p in list_ports.comports():
     print(p.device, p.description)
 
 # Connect to the correct port (replace with your actual COM port, e.g., COM6)
-device = Dobot(port="COM6")
+device = Dobot(port="COM7")
 
 # Get pose (tuple)
 pose = device.pose()

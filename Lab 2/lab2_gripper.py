@@ -12,15 +12,15 @@ r = 0        # rotation angle of the end-effector
 # --- Define pick and drop positions for 4 blocks ---
 # Fill these coordinates with your actual positions
 blocks = [
-    {"pick": {"x": 270, "y": -10, "z": -45}, "drop": {"x": 270, "y": -98, "z": -45}},
-    {"pick": {"x": 270, "y": 46, "z": -45}, "drop": {"x": 270, "y": -40, "z": -45}},
-    {"pick": {"x": 330, "y": 46, "z": -45}, "drop": {"x": 330, "y": -40, "z": -45}},
-    {"pick": {"x": 330.0, "y": -10, "z": -45}, "drop": {"x": 330, "y": -98.0, "z": -45}},
-
-    {"pick": {"x": 270, "y": -98, "z": -45}, "drop": {"x": 270, "y": -10, "z": -45}},
-    {"pick": {"x": 270, "y": -40, "z": -45}, "drop": {"x": 270, "y": 46, "z": -45}},
-    {"pick": {"x": 330, "y": -40, "z": -45}, "drop": {"x": 330, "y": 46, "z": -45}},
-    {"pick": {"x": 330.0, "y": -98, "z": -45}, "drop": {"x": 330, "y": -10.0, "z": -45}}
+    {"pick": {"x": 270, "y": -10, "z": -12}, "drop": {"x": 270, "y": -98, "z": -10, "r": 5}},
+    {"pick": {"x": 270, "y": 46, "z": -12}, "drop": {"x": 270, "y": -40, "z": -10, "r": 5}},
+    {"pick": {"x": 330.0, "y": -10, "z": -12}, "drop": {"x": 330, "y": -98.0, "z": -10, "r": 5}},
+    {"pick": {"x": 330, "y": 46, "z": -12}, "drop": {"x": 330, "y": -40, "z": -10, "r": 5}},
+    
+    {"pick": {"x": 270, "y": -98, "z": -12}, "drop": {"x": 270, "y": -10, "z": -10, "r": 10}},
+    {"pick": {"x": 270, "y": -40, "z": -12}, "drop": {"x": 270, "y": 46, "z": -10, "r": 10}},
+    {"pick": {"x": 330, "y": -40, "z": -12}, "drop": {"x": 330, "y": 46, "z": -10, "r": 10}},
+    {"pick": {"x": 330.0, "y": -98, "z": -12}, "drop": {"x": 330, "y": -10.0, "z": -10, "r": 10}}
 
 ]
 
@@ -41,7 +41,7 @@ for i, block in enumerate(blocks, start=1):
 
     # Enable suction
     print("Picking up pallet...")
-    device.suck(True)
+    device.grip(True)
     time.sleep(2)
 
     # Lift up
@@ -58,7 +58,7 @@ for i, block in enumerate(blocks, start=1):
 
     # Disable suction
     print("Dropping pallet...")
-    device.suck(False)
+    device.grip(False)
     time.sleep(2)
 
     # Lift up after drop

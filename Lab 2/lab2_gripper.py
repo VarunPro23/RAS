@@ -1,16 +1,13 @@
 from pydobot import Dobot
 import time
 
-# --- Connect to Dobot ---
 PORT = "COM7"
 device = Dobot(port=PORT)
 
-# --- Safe lift height and rotation ---
 z_lift = 50  # safe height for horizontal moves
 r = 0        # rotation angle of the end-effector
 
-# --- Define pick and drop positions for 4 blocks ---
-# Fill these coordinates with your actual positions
+# Coordinates for each block
 blocks = [
     {"pick": {"x": 270, "y": -10, "z": -12}, "drop": {"x": 270, "y": -98, "z": -10, "r": 5}},
     {"pick": {"x": 270, "y": 46, "z": -12}, "drop": {"x": 270, "y": -40, "z": -10, "r": 5}},
@@ -65,6 +62,6 @@ for i, block in enumerate(blocks, start=1):
     device.move_to(drop["x"], drop["y"], z_lift, r, wait=True)
     time.sleep(1)
 
-# --- Return to home / safe position ---
+# --- Return to safe position ---
 device.close()
 print("\nAll blocks handled successfully!")

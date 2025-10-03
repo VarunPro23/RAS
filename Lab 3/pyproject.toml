@@ -1,0 +1,13 @@
+[project]
+name = "lab-assignment-3"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "jinja2>=3.1.6",
+    "markupsafe>=3.0.2",
+    "opencv-python>=4.12.0.88",
+    "pillow>=11.3.0",
+    "pydobot2>=0.1.0",
+]

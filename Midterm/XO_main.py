@@ -17,6 +17,7 @@ import numpy as np
 import time
 import copy
 from collections import deque
+from pydobot import Dobot
 
 # ---------------------------
 # Configuration (EDIT THESE)
@@ -65,7 +66,6 @@ BLUE_UPPER = np.array([140, 255, 255])
 # Replace the functions in this script accordingly.
 
 try:
-    from pydobot import Dobot
     dobot = Dobot(COM_PORT)
 except Exception as e:
     print("Warning: can't import or connect to Dobot automatically. Make sure 'pydobot' is installed and COM_PORT is correct.")
@@ -327,7 +327,7 @@ def pick_and_place_from_supply(supply_pos, dest_xy):
 # ---------------------------
 def main():
     print("Starting Tic-Tac-Toe Dobot Controller")
-    cap = cv2.VideoCapture(CAM_INDEX)
+    cap = cv2.VideoCapture(CAM_INDEX)  # or CAM_INDEX
     if not cap.isOpened():
         print("Failed to open camera index", CAM_INDEX)
         return

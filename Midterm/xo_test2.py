@@ -12,23 +12,44 @@ Dobot = Dobot(port='/dev/ttyACM0')  # change to your Dobot port
 # ---------------------------------------------------
 # Open camera
 # ---------------------------------------------------
-cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture('/dev/video2')  # adjust camera index if needed
 
 # ---------------------------------------------------
-# Grid and positions (placeholders)
+# GRID CALIBRATION (Fill placeholders after calibration)
+# ---------------------------------------------------
+# These define your pallet region in camera pixels.
+# Replace x_min, x_max, y_min, y_max with your actual calibrated values.
+# Base calibration (from previous)
+x_min, x_max = 311, 467
+y_min, y_max = 230, 434  # from your good vertical tuning
+
+# Adjust horizontal width and position
+padding_x_left = 25    # expand left side
+padding_x_right = 25   # expand right side
+
+x_min -= padding_x_left
+x_max += padding_x_right
+
+# Recalculate divisions
+grid_x = [int(x_min + (x_max - x_min) * i / 3) for i in range(4)]
+grid_y = [int(y_min + (y_max - y_min) * i / 3) for i in range(4)]
+
+print("Adjusted grid_x:", grid_x)
+print("Adjusted grid_y:", grid_y)
+
+# ---------------------------------------------------
+# Dobot grid positions (physical coordinates) — fill these
 # ---------------------------------------------------
 grid_positions = [
     [(250, -30, -40), (250, -10, -40), (250, 10, -40)],
     [(270, -30, -40), (270, -10, -40), (270, 10, -40)],
     [(290, -30, -40), (290, -10, -40), (290, 10, -40)]
 ]
-source_position = (255, 110, -50)  # fill with (x, y, z)
-# set drop height to -40 so as to not disturb other blocks.
-# in source position, the z should start from -10, and decrease by -10 everytime a block is picked up.
+source_position = (255, 110, -50)  # (x, y, z) — adjust for block supply height
 
 # ---------------------------------------------------
 # Game Board
-# 0 = empty, 1 = player (red), 2 = robot (blue)
+# ---------------------------------------------------
 board = [[0, 0, 0],
          [0, 0, 0],
          [0, 0, 0]]
@@ -97,26 +118,31 @@ def find_best_move(b):
     return best_move
 
 # ---------------------------------------------------
-# Dobot Functions (mocked)
+# Dobot Movement
 # ---------------------------------------------------
 def move_to_grid(row, col):
     if not grid_positions[row][col]:
         print(f"No coordinates set for grid cell ({row}, {col})")
         return
     x, y, z = grid_positions[row][col]
-    # Dobot.move_to(x, y, z)
+    Dobot.move_to(x, y, z)
     time.sleep(1)
 
 def pick_and_place_block(source, dest):
+    home_position = (225, 5, 20)  # safe home position
+    Dobot.move_to(home_position)
     Dobot.move_to(*source)
     Dobot.suck(True)
+    time.sleep(2)
     Dobot.move_to(*dest)
+    time.sleep(2)
     Dobot.suck(False)
-    print(f"Robot places block at {dest}")
-    time.sleep(1)
+    print(f"Robot placed block at {dest}")
+    time.sleep(2)
+    Dobot.move_to(home_position)
 
 # ---------------------------------------------------
-# OpenCV Color Detection
+# Color Detection: Red (X) and Yellow (O)
 # ---------------------------------------------------
 def detect_colors(frame):
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
@@ -128,38 +154,35 @@ def detect_colors(frame):
     upper_red2 = np.array([180, 255, 255])
     mask_red = cv2.inRange(hsv, lower_red1, upper_red1) + cv2.inRange(hsv, lower_red2, upper_red2)
 
-    # Blue
-    lower_blue = np.array([100, 150, 0])
-    upper_blue = np.array([140, 255, 255])
-    mask_blue = cv2.inRange(hsv, lower_blue, upper_blue)
+    # Yellow
+    lower_yellow = np.array([20, 100, 100])
+    upper_yellow = np.array([35, 255, 255])
+    mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
 
-    red_centers, blue_centers = [], []
-    for mask, centers in [(mask_red, red_centers), (mask_blue, blue_centers)]:
+    red_centers, yellow_centers = [], []
+    for mask, centers in [(mask_red, red_centers), (mask_yellow, yellow_centers)]:
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         for cnt in contours:
-            if cv2.contourArea(cnt) > 300:  # ignore small noise
+            if cv2.contourArea(cnt) > 300:
                 x, y, w, h = cv2.boundingRect(cnt)
                 centers.append((x + w // 2, y + h // 2))
-    return red_centers, blue_centers
+    return red_centers, yellow_centers
 
 # ---------------------------------------------------
-# Map pixel to grid
+# Pixel → Grid Mapping
 # ---------------------------------------------------
-def map_to_grid(centers):
-    grid_cells = []
-    for (cx, cy) in centers:
-        row, col = 0, 0
-        if cx < 200: col = 0
-        elif cx < 400: col = 1
-        else: col = 2
-        if cy < 200: row = 0
-        elif cy < 400: row = 1
-        else: row = 2
-        grid_cells.append((row, col))
-    return grid_cells
+def pixel_to_grid(cx, cy):
+    row = col = 0
+    for i in range(3):
+        if grid_x[i] <= cx < grid_x[i + 1]:
+            col = i
+        if grid_y[i] <= cy < grid_y[i + 1]:
+            row = i
+    # Flip rows vertically so top row = 0
+    return 2 - row, col
 
 # ---------------------------------------------------
-# NEW: Choose first player
+# Game Setup
 # ---------------------------------------------------
 choice = input("Who plays first? (human/robot): ").strip().lower()
 if choice not in ["human", "robot"]:
@@ -168,18 +191,18 @@ if choice not in ["human", "robot"]:
 
 if choice == "human":
     human_symbol = 1  # red
-    robot_symbol = 2  # blue
+    robot_symbol = 2  # yellow
     player_turn = True
 else:
-    human_symbol = 2  # blue
+    human_symbol = 2  # yellow
     robot_symbol = 1  # red
     player_turn = False
 
-print(f"Human is {'Red (X)' if human_symbol == 1 else 'Blue (O)'}")
-print(f"Robot is {'Red (X)' if robot_symbol == 1 else 'Blue (O)'}")
+print(f"Human is {'Red (X)' if human_symbol == 1 else 'Yellow (O)'}")
+print(f"Robot is {'Red (X)' if robot_symbol == 1 else 'Yellow (O)'}")
 
 # ---------------------------------------------------
-# Game Loop
+# Main Game Loop
 # ---------------------------------------------------
 previous_human_blocks = set()
 
@@ -190,27 +213,42 @@ while True:
     if not ret:
         break
 
-    red_centers, blue_centers = detect_colors(frame)
-    red_cells = set(map_to_grid(red_centers))
-    blue_cells = set(map_to_grid(blue_centers))
+    red_centers, yellow_centers = detect_colors(frame)
+    red_cells = set(pixel_to_grid(cx, cy) for cx, cy in red_centers)
+    yellow_cells = set(pixel_to_grid(cx, cy) for cx, cy in yellow_centers)
 
-    # Combine detections
-    current_human_blocks = red_cells if human_symbol == 1 else blue_cells
-    current_robot_blocks = blue_cells if robot_symbol == 2 else red_cells
+    # Draw grid overlay for visual check
+    for x in grid_x:
+        cv2.line(frame, (x, y_min), (x, y_max), (255, 255, 255), 1)
+    for y in grid_y:
+        cv2.line(frame, (x_min, y), (x_max, y), (255, 255, 255), 1)
 
-    # Check for invalid human move
+    # Label cells (row,col)
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    for i in range(3):
+        for j in range(3):
+            cx = int((grid_x[j] + grid_x[j+1]) / 2)
+            cy = int((grid_y[i] + grid_y[i+1]) / 2)
+            label = f"({2-i},{j})"
+            cv2.putText(frame, label, (cx-25, cy+5), font, 0.5, (255, 255, 255), 1)
+
+    # Identify player and robot cells
+    current_human_blocks = red_cells if human_symbol == 1 else yellow_cells
+    current_robot_blocks = yellow_cells if robot_symbol == 2 else red_cells
+
+    # Validate human move
     new_human_blocks = current_human_blocks - previous_human_blocks
     if player_turn:
         if len(new_human_blocks) == 0:
-            pass  # waiting for move
+            pass
         elif len(new_human_blocks) > 1:
-            print("⚠️ Error: Multiple new blocks detected. Only one move allowed!")
+            print("⚠️  Multiple new blocks detected! Only one move allowed.")
             time.sleep(2)
             continue
         else:
             (row, col) = list(new_human_blocks)[0]
             if board[row][col] != 0:
-                print("⚠️ Error: Cell already occupied!")
+                print("⚠️  Cell already occupied!")
                 time.sleep(2)
                 continue
             board[row][col] = human_symbol
@@ -232,7 +270,7 @@ while True:
 
     # Robot move
     if not player_turn:
-        print("Robot's turn...")
+        print("🤖 Robot's turn...")
         row, col = find_best_move(board)
         if row != -1 and col != -1:
             print(f"🤖 Robot plays at ({row}, {col})")
@@ -246,4 +284,4 @@ while True:
 
 cap.release()
 cv2.destroyAllWindows()
-# Dobot.close()
+Dobot.close()

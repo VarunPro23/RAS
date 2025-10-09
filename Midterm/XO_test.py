@@ -133,7 +133,7 @@ def pick_and_place_block(source, dest):
     # Move to destination
     Dobot.move_to(dx, dy, dz)
     Dobot.suck(False)
-    print(f"🤖 Robot placed block at {dest}")
+    print(f" Robot placed block at {dest}")
 
     # Return to home
     Dobot.move_to(home_position)
@@ -236,7 +236,7 @@ while True:
         if len(new_human_blocks) == 0:
             pass  # waiting
         elif len(new_human_blocks) > 1:
-            print("⚠️ Multiple new blocks detected! Only one move allowed.")
+            print(" Multiple new blocks detected! Only one move allowed.")
             time.sleep(2)
             continue
         else:
@@ -246,19 +246,19 @@ while True:
             correct_color = (human_symbol == 1 and (row,col) in red_cells) or \
                             (human_symbol == 2 and (row,col) in yellow_cells)
             if not correct_color:
-                print("⚠️ Wrong block used by player!")
+                print(" Wrong block used by player!")
                 time.sleep(2)
                 continue
 
             if board[row][col] != 0:
-                print("⚠️ Cell already occupied!")
+                print(" Cell already occupied!")
                 time.sleep(2)
                 continue
 
             board[row][col] = human_symbol
             previous_human_blocks = current_human_blocks
             player_turn = False
-            print(f"✅ Human placed at ({row},{col})")
+            print(f" Human placed at ({row},{col})")
 
             # Wait 2-3 seconds before robot moves
             time.sleep(3)
@@ -268,7 +268,7 @@ while True:
     # -------------------
     winner = check_winner(board)
     if winner != 0:
-        print("🎉 Human wins!" if winner == human_symbol else "🤖 Robot wins!")
+        print(" Human wins!" if winner == human_symbol else " Robot wins!")
         break
     if not is_moves_left(board):
         print("It's a draw!")
@@ -278,13 +278,14 @@ while True:
     # Robot Move
     # -------------------
     if not player_turn:
-        print("🤖 Robot's turn...")
+        print(" Robot's turn...")
         row, col = find_best_move(board)
         if row != -1 and col != -1:
-            print(f"🤖 Robot plays at ({row},{col})")
+            print(f" Robot plays at ({row},{col})")
             pick_and_place_block(source_position, grid_positions[row][col])
             board[row][col] = robot_symbol
         player_turn = True
+        time.sleep(2)
 
     cv2.imshow("Tic Tac Toe", frame)
     if cv2.waitKey(1) & 0xFF == ord('q'):

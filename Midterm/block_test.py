@@ -28,12 +28,12 @@ def pick_and_place_block(source, dest):
 
     # Move to home first
     Dobot.move_to(*home_position)
-    time.sleep(1)
+    time.sleep(2)
 
     # Pick from current stack height
     Dobot.move_to(sx, sy, current_source_z)
     Dobot.suck(True)
-    time.sleep(1)
+    time.sleep(2)
 
     # Lift slightly before moving
     Dobot.move_to(sx, sy, current_source_z + 30)
@@ -41,6 +41,7 @@ def pick_and_place_block(source, dest):
     # Move to destination
     Dobot.move_to(dx, dy, dz)
     Dobot.suck(False)
+    time.sleep(2)
     print(f"🤖 Placed block at {dest}")
 
     # Return home

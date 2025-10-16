@@ -7,24 +7,20 @@ import math
 # ---------------------------------------------------
 # Connect to Dobot
 # ---------------------------------------------------
-Dobot = Dobot(port='/dev/ttyACM0')  # change to your Dobot port
+Dobot = Dobot(port='/dev/ttyACM0')  # change if needed
 
 # ---------------------------------------------------
 # Open camera
 # ---------------------------------------------------
-cap = cv2.VideoCapture('/dev/video2')  # adjust camera index if needed
+cap = cv2.VideoCapture('/dev/video2')  # adjust index if needed
 
 # ---------------------------------------------------
 # GRID CALIBRATION
 # ---------------------------------------------------
 x_min, x_max = 311, 467
 y_min, y_max = 230, 434
-
-padding_x_left = 25
-padding_x_right = 25
-x_min -= padding_x_left
-x_max += padding_x_right
-
+x_min -= 25
+x_max += 25
 grid_x = [int(x_min + (x_max - x_min) * i / 3) for i in range(4)]
 grid_y = [int(y_min + (y_max - y_min) * i / 3) for i in range(4)]
 
@@ -32,13 +28,13 @@ grid_y = [int(y_min + (y_max - y_min) * i / 3) for i in range(4)]
 # Dobot physical positions
 # ---------------------------------------------------
 grid_positions = [
-    [(250, -30, -40), (250, -10, -40), (250, 10, -40)],
-    [(270, -30, -40), (270, -10, -40), (270, 10, -40)],
-    [(290, -30, -40), (290, -10, -40), (290, 10, -40)]
+    [(255, -35, -40), (255, -15, -40), (255, 5, -40)],
+    [(275, -35, -40), (275, -15, -40), (275, 5, -40)],
+    [(295, -35, -40), (290, -15, -40), (290, 5, -40)]
 ]
-source_position = (255, 110, -10)  # starting z of the block stack
+source_position = (255, 104, -10)
 current_source_z = source_position[2]
-home_position = (225, 5, 20)
+home_position = (253, -4, 34)
 
 # ---------------------------------------------------
 # Game Board
@@ -66,10 +62,10 @@ def is_moves_left(b):
     return any(0 in row for row in b)
 
 def evaluate(b):
-    winner = check_winner(b)
-    if winner == 2:
+    w = check_winner(b)
+    if w == 2:
         return 10
-    elif winner == 1:
+    elif w == 1:
         return -10
     return 0
 
@@ -98,17 +94,17 @@ def minimax(b, depth, is_max):
 
 def find_best_move(b):
     best_val = -math.inf
-    best_move = (-1, -1)
+    move = (-1, -1)
     for i in range(3):
         for j in range(3):
             if b[i][j] == 0:
                 b[i][j] = 2
-                move_val = minimax(b, 0, False)
+                val = minimax(b, 0, False)
                 b[i][j] = 0
-                if move_val > best_val:
-                    best_move = (i, j)
-                    best_val = move_val
-    return best_move
+                if val > best_val:
+                    best_val = val
+                    move = (i, j)
+    return move
 
 # ---------------------------------------------------
 # Dobot Movement
@@ -118,65 +114,54 @@ def pick_and_place_block(source, dest):
     sx, sy, _ = source
     dx, dy, dz = dest
 
-    # Move to home first
     Dobot.move_to(*home_position)
-    time.sleep(1)
-
-    # Pick from current stack height
+    time.sleep(0.5)
+    Dobot.move_to(255, 105, 10)
     Dobot.move_to(sx, sy, current_source_z)
     Dobot.suck(True)
     time.sleep(1)
-
-    # Lift slightly before moving
     Dobot.move_to(sx, sy, current_source_z + 30)
-
-    # Move to destination
+    Dobot.move_to(*home_position)
     Dobot.move_to(dx, dy, dz)
     Dobot.suck(False)
-    print(f" Robot placed block at {dest}")
-
-    # Return to home
-    Dobot.move_to(home_position)
-
-    # Decrease source Z for next pick
+    Dobot.move_to(*home_position)
     current_source_z -= 10
-    time.sleep(1)
+    print(f" Robot placed at {dest}")
 
 # ---------------------------------------------------
-# Color Detection: Red (X) and Yellow (O)
+# Color Detection
 # ---------------------------------------------------
 def detect_colors(frame):
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-    lower_red1 = np.array([0, 120, 70])
-    upper_red1 = np.array([10, 255, 255])
-    lower_red2 = np.array([170, 120, 70])
-    upper_red2 = np.array([180, 255, 255])
+    lower_red1, upper_red1 = np.array([0,120,70]), np.array([10,255,255])
+    lower_red2, upper_red2 = np.array([170,120,70]), np.array([180,255,255])
     mask_red = cv2.inRange(hsv, lower_red1, upper_red1) + cv2.inRange(hsv, lower_red2, upper_red2)
 
-    lower_yellow = np.array([20, 100, 100])
-    upper_yellow = np.array([35, 255, 255])
+    lower_yellow, upper_yellow = np.array([20,100,100]), np.array([35,255,255])
     mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
 
-    red_centers, yellow_centers = [], []
-    for mask, centers in [(mask_red, red_centers), (mask_yellow, yellow_centers)]:
+    red, yellow = [], []
+    for mask, centers in [(mask_red, red), (mask_yellow, yellow)]:
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        for cnt in contours:
-            if cv2.contourArea(cnt) > 300:
-                x, y, w, h = cv2.boundingRect(cnt)
+        for c in contours:
+            if cv2.contourArea(c) > 300:
+                x, y, w, h = cv2.boundingRect(c)
                 centers.append((x + w // 2, y + h // 2))
-    return red_centers, yellow_centers
+    return red, yellow
 
 # ---------------------------------------------------
-# Pixel → Grid Mapping
+# Pixel to Grid
 # ---------------------------------------------------
 def pixel_to_grid(cx, cy):
-    row = col = 0
+    row, col = -1, -1
     for i in range(3):
         if grid_x[i] <= cx < grid_x[i + 1]:
             col = i
         if grid_y[i] <= cy < grid_y[i + 1]:
             row = i
+    if row == -1 or col == -1:
+        return (-1, -1)
     return 2 - row, col  # flip vertical
 
 # ---------------------------------------------------
@@ -187,32 +172,38 @@ if choice not in ["human", "robot"]:
     choice = "human"
 
 if choice == "human":
-    human_symbol = 1  # red
-    robot_symbol = 2  # yellow
-    player_turn = True
-elif choice == "robot":
-    human_symbol = 2  # yellow
-    robot_symbol = 1  # red
-    player_turn = False
+    human_symbol, robot_symbol, player_turn = 1, 2, True
 else:
-    print("Invalid input")
+    human_symbol, robot_symbol, player_turn = 2, 1, False
 
 previous_human_blocks = set()
+robot_has_played = False
+
 print("Starting Tic Tac Toe...")
+Dobot.move_to(*home_position)
 
 # ---------------------------------------------------
-# Main Game Loop
+# Main Loop (live camera, no threading)
 # ---------------------------------------------------
 while True:
     ret, frame = cap.read()
     if not ret:
         break
 
-    red_centers, yellow_centers = detect_colors(frame)
-    red_cells = set(pixel_to_grid(cx, cy) for cx, cy in red_centers)
-    yellow_cells = set(pixel_to_grid(cx, cy) for cx, cy in yellow_centers)
+    red, yellow = detect_colors(frame)
 
-    # Draw grid overlay
+    # Map detections to grid
+    red_cells, yellow_cells = set(), set()
+    for x, y in red:
+        rc = pixel_to_grid(x, y)
+        if rc != (-1, -1):
+            red_cells.add(rc)
+    for x, y in yellow:
+        rc = pixel_to_grid(x, y)
+        if rc != (-1, -1):
+            yellow_cells.add(rc)
+
+    # Draw grid
     for x in grid_x:
         cv2.line(frame, (x, y_min), (x, y_max), (255, 255, 255), 1)
     for y in grid_y:
@@ -225,68 +216,74 @@ while True:
             cy = int((grid_y[i] + grid_y[i+1]) / 2)
             cv2.putText(frame, f"({2-i},{j})", (cx-25, cy+5), font, 0.5, (255,255,255), 1)
 
-    current_human_blocks = red_cells if human_symbol == 1 else yellow_cells
-    current_robot_blocks = yellow_cells if robot_symbol == 2 else red_cells
+    # Determine current blocks
+    current_human = red_cells if human_symbol == 1 else yellow_cells
+    current_robot = yellow_cells if robot_symbol == 2 else red_cells
+    new_human = current_human - previous_human_blocks
 
-    # -------------------
-    # Human Move Validation
-    # -------------------
-    new_human_blocks = current_human_blocks - previous_human_blocks
+    # -----------------------------
+    # HUMAN TURN
+    # -----------------------------
     if player_turn:
-        if len(new_human_blocks) == 0:
-            pass  # waiting
-        elif len(new_human_blocks) > 1:
-            print(" Multiple new blocks detected! Only one move allowed.")
-            time.sleep(2)
-            continue
-        else:
-            (row, col) = list(new_human_blocks)[0]
+        if len(new_human) == 1:
+            row, col = list(new_human)[0]
+            if board[row][col] == 0:
+                board[row][col] = human_symbol
+                previous_human_blocks = current_human
+                player_turn = False
+                robot_has_played = False
+                print(f" Human placed at ({row},{col})")
 
-            # Check if human used the correct color
-            correct_color = (human_symbol == 1 and (row,col) in red_cells) or \
-                            (human_symbol == 2 and (row,col) in yellow_cells)
-            if not correct_color:
-                print(" Wrong block used by player!")
-                time.sleep(2)
-                continue
+                # ✅ Check winner immediately after human move
+                winner = check_winner(board)
+                if winner != 0:
+                    print(" Human wins!" if winner == human_symbol else " Robot wins!")
+                    cv2.putText(frame, f"{'Human' if winner == human_symbol else 'Robot'} wins!", (60,60),
+                                font, 1, (0,255,0), 2)
+                    cv2.imshow("Tic Tac Toe", frame)
+                    cv2.waitKey(3000)
+                    break
+                elif not is_moves_left(board):
+                    print("It's a draw!")
+                    cv2.putText(frame, "Draw!", (150,60), font, 1, (0,255,255), 2)
+                    cv2.imshow("Tic Tac Toe", frame)
+                    cv2.waitKey(3000)
+                    break
+            else:
+                print("Cell already occupied!")
 
-            if board[row][col] != 0:
-                print(" Cell already occupied!")
-                time.sleep(2)
-                continue
-
-            board[row][col] = human_symbol
-            previous_human_blocks = current_human_blocks
-            player_turn = False
-            print(f" Human placed at ({row},{col})")
-
-            # Wait 2-3 seconds before robot moves
-            time.sleep(3)
-
-    # -------------------
-    # Check Winner / Draw
-    # -------------------
-    winner = check_winner(board)
-    if winner != 0:
-        print(" Human wins!" if winner == human_symbol else " Robot wins!")
-        break
-    if not is_moves_left(board):
-        print("It's a draw!")
-        break
-
-    # -------------------
-    # Robot Move
-    # -------------------
-    if not player_turn:
+    # -----------------------------
+    # ROBOT TURN
+    # -----------------------------
+    elif not player_turn and not robot_has_played:
         print(" Robot's turn...")
         row, col = find_best_move(board)
         if row != -1 and col != -1:
             print(f" Robot plays at ({row},{col})")
             pick_and_place_block(source_position, grid_positions[row][col])
             board[row][col] = robot_symbol
-        player_turn = True
-        time.sleep(2)
+        robot_has_played = True
+        player_turn = True  # Give control back to human
 
+        # ✅ Check winner immediately after robot move
+        winner = check_winner(board)
+        if winner != 0:
+            print(" Human wins!" if winner == human_symbol else " Robot wins!")
+            cv2.putText(frame, f"{'Human' if winner == human_symbol else 'Robot'} wins!", (60,60),
+                        font, 1, (0,255,0), 2)
+            cv2.imshow("Tic Tac Toe", frame)
+            cv2.waitKey(3000)
+            break
+        elif not is_moves_left(board):
+            print("It's a draw!")
+            cv2.putText(frame, "Draw!", (150,60), font, 1, (0,255,255), 2)
+            cv2.imshow("Tic Tac Toe", frame)
+            cv2.waitKey(3000)
+            break
+
+    # -----------------------------
+    # Show frame live
+    # -----------------------------
     cv2.imshow("Tic Tac Toe", frame)
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break

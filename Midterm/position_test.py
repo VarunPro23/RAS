@@ -6,6 +6,7 @@ import numpy as np
 # Open camera
 # ------------------------------
 cap = cv2.VideoCapture('/dev/video2')  # adjust if needed
+Dobot = Dobot(port='/dev/ttyACM0')
 print(Dobot.get_pose())  # just to ensure connection is alive
 
 # Base calibration (from previous)

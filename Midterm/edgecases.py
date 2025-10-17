@@ -1,10 +1,14 @@
 import cv2
 import numpy as np
 import time
+from pydobot import Dobot
 
 # ---------------------------------------------------
 # Camera Setup
 # ---------------------------------------------------
+home_position = (253,-4,34)  # safe home position
+Dobot = Dobot(port='/dev/ttyACM0')
+Dobot.move_to(*home_position)
 cap = cv2.VideoCapture('/dev/video2')  # adjust camera index if needed
 
 # ---------------------------------------------------

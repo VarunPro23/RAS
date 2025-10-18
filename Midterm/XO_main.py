@@ -1,486 +1,413 @@
-"""
-Dobot Tic-Tac-Toe controller
-- Camera detects red/blue blocks and their centroids.
-- Maps centroids to 3x3 grid cells using perspective transform obtained via clicking 4 pallet corners.
-- Human = RED (X). Robot = BLUE (O).
-- Robot picks a blue block from a blue stack pick point and places it on chosen cell.
-- Adapt the DOBOt/gripper function placeholders to match your pydobot API.
-
-Dependencies:
-- opencv-python (cv2)
-- numpy
-- pydobot or your Dobot control library
-"""
-
 import cv2
 import numpy as np
 import time
-import copy
-from collections import deque
 from pydobot import Dobot
+import math
 
-# ---------------------------
-# Configuration (EDIT THESE)
-# ---------------------------
-CAM_INDEX = 0  # OpenCV camera index
-COM_PORT = "COM3"  # or '/dev/ttyUSB0' on Linux; change as required
+# Connect to Dobot
+Dobot = Dobot(port="/dev/ttyACM0") 
 
-# Physical safe heights (mm) - change according to your Dobot/tooling
-Z_APPROACH = 120   # height above pallet to travel safely
-Z_PICK = 40        # height to pick a block (touching block)
-Z_PLACE = 40       # height to place block
-Z_SAFE = 150       # higher safe travel height
+# Open camera
+cap = cv2.VideoCapture("/dev/video2")
 
-# Approximate times to wait for gripper open/close to complete (tweak)
-GRIPPER_ACTION_TIME = 0.6
+# Grid Calibration
+x_min, x_max = 311, 467
+y_min, y_max = 230, 434
+x_min -= 25
+x_max += 25
+grid_x = [int(x_min + (x_max - x_min) * i / 3) for i in range(4)]
+grid_y = [int(y_min + (y_max - y_min) * i / 3) for i in range(4)]
 
-# Supply pick locations (real-world coordinates in mm) for blue (robot) and red (human supply)
-# YOU MUST UPDATE THESE to the actual positions near the pallet where stacks are.
-BLUE_SUPPLY_POS = (300, 50, Z_APPROACH)   # x,y,z to approach then lower to Z_PICK
-RED_SUPPLY_POS  = (300, -50, Z_APPROACH)  # if you want robot to pick red maybe to move them
+# Grid Position Coordinates
+grid_positions = [
+    [(295, 5, -38), (295, -15, -38), (295, -35, -38)],   # row 0 (BOTTOM)
+    [(275, 5, -38), (275, -15, -38), (275, -35, -38)],   # row 1 (MIDDLE)
+    [(255, 5, -38), (255, -15, -38), (255, -35, -38)]    # row 2 (TOP)
+]
 
-# Robot travel speed parameters might be needed by your pydobot wrapper — adjust as necessary.
+# Source positions for block stacks (red / yellow)
+source_position_red = (255, 104, -6)
+source_position_yellow = (255, -112, -6)
 
-# Minimum contour area to consider a valid block detection
-MIN_CONTOUR_AREA = 300
+red_current_source_z = source_position_red[2]
+yellow_current_source_z = source_position_yellow[2]
+home_position = (245, -1.5, 39)
 
-# HSV color ranges (tweak to your lighting)
-# Red needs two ranges because hue wraps around 180.
-RED_LOWER1 = np.array([0, 120, 70])
-RED_UPPER1 = np.array([10, 255, 255])
-RED_LOWER2 = np.array([170, 120, 70])
-RED_UPPER2 = np.array([180, 255, 255])
+# Game board
+board = [[0, 0, 0], 
+         [0, 0, 0], 
+         [0, 0, 0]]
 
-BLUE_LOWER = np.array([100, 120, 70])
-BLUE_UPPER = np.array([140, 255, 255])
+# Game logic
+def check_winner(b):
+    for i in range(3):
+        if b[i][0] == b[i][1] == b[i][2] != 0:
+            return b[i][0]
+        if b[0][i] == b[1][i] == b[2][i] != 0:
+            return b[0][i]
+    if b[0][0] == b[1][1] == b[2][2] != 0:
+        return b[0][0]
+    if b[0][2] == b[1][1] == b[2][0] != 0:
+        return b[0][2]
+    return 0
 
-# ---------------------------
-# IMPORT/INIT DOBOT (placeholder)
-# ---------------------------
-# Many pydobot wrappers use:
-#   from pydobot import Dobot
-#   dobot = Dobot(COM_PORT)
-#
-# Others use: Dobot(COM_PORT, debug=True)
-# Also some use dobot.move_to(x,y,z) or dobot.move(x,y,z)
-# Replace the functions in this script accordingly.
+def is_moves_left(b):
+    return any(0 in row for row in b)
 
-try:
-    dobot = Dobot(COM_PORT)
-except Exception as e:
-    print("Warning: can't import or connect to Dobot automatically. Make sure 'pydobot' is installed and COM_PORT is correct.")
-    dobot = None
+def evaluate(b, robot_sym, human_sym):
+    winner = check_winner(b)
+    if winner == robot_sym:
+        return 10
+    elif winner == human_sym:
+        return -10
+    return 0
 
-# ---------------------------
-# Helper: Dobot command wrappers (ADAPT THESE)
-# ---------------------------
-def dob_move_abs(x, y, z, r=0, wait=True):
-    """
-    Move dob to absolute (x,y,z); replace body with exact API call.
-    """
-    if dobot is None:
-        print(f"[SIM MOVE] goto ({x:.1f},{y:.1f},{z:.1f})")
-        time.sleep(0.3)
-        return
-    # Example for some wrappers:
-    try:
-        # Example: dobot.move_to(x, y, z, r) OR dobot.move(x,y,z) - change as needed
-        if hasattr(dobot, "move_to"):
-            dobot.move_to(x, y, z, r)
-        elif hasattr(dobot, "move"):
-            dobot.move(x, y, z)
-        elif hasattr(dobot, "go_home"):
-            # fallback: set_pose then move
-            dobot.move_to(x, y, z)
-        else:
-            # Last resort: print
-            print("Dobot SDK present but wrapper method unknown. Edit dob_move_abs().")
-    except Exception as e:
-        print("Dobot motion error:", e)
-    if wait:
-        time.sleep(0.5)
+# Minimax algorithm to find best move
+def minimax(b, depth, is_max, robot_sym, human_sym):
+    score = evaluate(b, robot_sym, human_sym)
+    # prefer faster wins / slower losses
+    if score != 0:
+        return score - depth if score > 0 else score + depth
+    if not is_moves_left(b):
+        return 0
 
-def gripper_close():
-    """
-    Close the gripper (or engage suction). Replace with your API call.
-    """
-    if dobot is None:
-        print("[SIM GRIP] close")
-        time.sleep(GRIPPER_ACTION_TIME)
-        return
-    # Example: dobot.set_gripper(1) or dobot.suck(1)
-    try:
-        if hasattr(dobot, "set_gripper"):
-            dobot.set_gripper(1)
-        elif hasattr(dobot, "vacuum_on"):
-            dobot.vacuum_on()
-        elif hasattr(dobot, "suck"):
-            dobot.suck(1)
-        else:
-            print("No known gripper method found; edit gripper_close().")
-    except Exception as e:
-        print("Gripper close error:", e)
-    time.sleep(GRIPPER_ACTION_TIME)
-
-def gripper_open():
-    """
-    Open the gripper (or release suction). Replace with your API call.
-    """
-    if dobot is None:
-        print("[SIM GRIP] open")
-        time.sleep(GRIPPER_ACTION_TIME)
-        return
-    try:
-        if hasattr(dobot, "set_gripper"):
-            dobot.set_gripper(0)
-        elif hasattr(dobot, "vacuum_off"):
-            dobot.vacuum_off()
-        elif hasattr(dobot, "suck"):
-            dobot.suck(0)
-        else:
-            print("No known gripper method found; edit gripper_open().")
-    except Exception as e:
-        print("Gripper open error:", e)
-    time.sleep(GRIPPER_ACTION_TIME)
-
-# ---------------------------
-# Image / calibration utilities
-# ---------------------------
-def click_points_for_corners(window_name, frame, num_points=4):
-    """
-    Let user click `num_points` on frame; returns list of (x,y) in pixel coords.
-    """
-    points = []
-
-    clone = frame.copy()
-    def mouse_cb(event, x, y, flags, param):
-        if event == cv2.EVENT_LBUTTONDOWN:
-            points.append((x, y))
-            cv2.circle(clone, (x, y), 6, (0,255,0), -1)
-            cv2.imshow(window_name, clone)
-
-    cv2.namedWindow(window_name)
-    cv2.setMouseCallback(window_name, mouse_cb)
-
-    print(f"Please click {num_points} corners on the image window in order (clockwise or counterclockwise). Press 'c' to confirm when done.")
-    while True:
-        cv2.imshow(window_name, clone)
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord('c') and len(points) >= num_points:
-            break
-        if key == ord('q'):
-            break
-    cv2.setMouseCallback(window_name, lambda *args: None)
-    return points
-
-def compute_homography(pixel_corners, real_corners):
-    """
-    pixel_corners: list of 4 (x,y) clicked on image (ordered)
-    real_corners: list of 4 (X,Y) physical coordinates in mm (ordered same as pixels)
-    returns a 3x3 homography matrix to map pixel -> real-world XY
-    """
-    pts_src = np.array(pixel_corners, dtype=np.float32)
-    pts_dst = np.array(real_corners, dtype=np.float32)
-    H, status = cv2.findHomography(pts_src, pts_dst)
-    return H
-
-def pixel_to_world(homography, px, py):
-    """
-    Map pixel (px,py) to real world XY using homography.
-    """
-    pt = np.array([ [px, py, 1.0] ]).T
-    world = homography.dot(pt)
-    world = world / world[2,0]
-    return float(world[0,0]), float(world[1,0])
-
-# ---------------------------
-# Grid helpers
-# ---------------------------
-def grid_index_from_world(x, y, grid_origin, cell_size):
-    """
-    Convert world XY to grid index (0..8). grid_origin is the world XY of grid cell (0,0) top-left.
-    cell_size is (cell_w, cell_h) in mm.
-    Returns index (row*3 + col) or None if outside.
-    """
-    ox, oy = grid_origin
-    cx, cy = cell_size
-    col = int((x - ox) / cx)
-    row = int((y - oy) / cy)
-    if 0 <= row < 3 and 0 <= col < 3:
-        return row * 3 + col
-    return None
-
-def world_coord_for_cell(grid_origin, cell_size, cell_index):
-    row = cell_index // 3
-    col = cell_index % 3
-    cx, cy = cell_size
-    x = grid_origin[0] + (col + 0.5) * cx
-    y = grid_origin[1] + (row + 0.5) * cy
-    return (x, y)
-
-# ---------------------------
-# Color detection
-# ---------------------------
-def detect_color_centroids(frame):
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-
-    # RED mask (two ranges)
-    mask1 = cv2.inRange(hsv, RED_LOWER1, RED_UPPER1)
-    mask2 = cv2.inRange(hsv, RED_LOWER2, RED_UPPER2)
-    red_mask = cv2.bitwise_or(mask1, mask2)
-    blue_mask = cv2.inRange(hsv, BLUE_LOWER, BLUE_UPPER)
-
-    # Clean masks
-    kernel = np.ones((5,5), np.uint8)
-    red_mask = cv2.morphologyEx(red_mask, cv2.MORPH_OPEN, kernel)
-    red_mask = cv2.morphologyEx(red_mask, cv2.MORPH_CLOSE, kernel)
-    blue_mask = cv2.morphologyEx(blue_mask, cv2.MORPH_OPEN, kernel)
-    blue_mask = cv2.morphologyEx(blue_mask, cv2.MORPH_CLOSE, kernel)
-
-    def mask_to_centroids(mask):
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        centers = []
-        for cnt in contours:
-            area = cv2.contourArea(cnt)
-            if area < MIN_CONTOUR_AREA:
-                continue
-            M = cv2.moments(cnt)
-            if M['m00'] == 0:
-                continue
-            cx = int(M['m10']/M['m00'])
-            cy = int(M['m01']/M['m00'])
-            centers.append(((cx, cy), area, cnt))
-        return centers
-
-    red_centers = mask_to_centroids(red_mask)
-    blue_centers = mask_to_centroids(blue_mask)
-    return red_centers, blue_centers, red_mask, blue_mask
-
-# ---------------------------
-# Tic-Tac-Toe game logic (minimax)
-# ---------------------------
-def check_winner(board):
-    wins = [(0,1,2),(3,4,5),(6,7,8),(0,3,6),(1,4,7),(2,5,8),(0,4,8),(2,4,6)]
-    for a,b,c in wins:
-        if board[a] and board[a] == board[b] == board[c]:
-            return board[a]
-    if all(board):
-        return "draw"
-    return None
-
-def minimax(board, player, ai_player, hu_player):
-    winner = check_winner(board)
-    if winner == ai_player:
-        return 1, None
-    if winner == hu_player:
-        return -1, None
-    if winner == "draw":
-        return 0, None
-
-    moves = []
-    for i in range(9):
-        if board[i] is None:
-            newb = board.copy()
-            newb[i] = player
-            score, _ = minimax(newb, hu_player if player == ai_player else ai_player, ai_player, hu_player)
-            moves.append((score, i))
-    if player == ai_player:
-        # maximize
-        best = max(moves, key=lambda x: x[0])
+    if is_max:
+        best = -math.inf
+        for i in range(3):
+            for j in range(3):
+                if b[i][j] == 0:
+                    b[i][j] = robot_sym
+                    best = max(best, minimax(b, depth + 1, False, robot_sym, human_sym))
+                    b[i][j] = 0
+        return best
     else:
-        best = min(moves, key=lambda x: x[0])
-    return best
+        best = math.inf
+        for i in range(3):
+            for j in range(3):
+                if b[i][j] == 0:
+                    b[i][j] = human_sym
+                    best = min(best, minimax(b, depth + 1, True, robot_sym, human_sym))
+                    b[i][j] = 0
+        return best
 
-def ai_choose_move(board, ai_player="O", hu_player="X"):
-    _, move = minimax(board, ai_player, ai_player, hu_player)
-    return move
+def find_best_move(b, robot_sym, human_sym):
+    best_val = -math.inf
+    best_move = (-1, -1)
+    for i in range(3):
+        for j in range(3):
+            if b[i][j] == 0:
+                b[i][j] = robot_sym
+                move_val = minimax(b, 0, False, robot_sym, human_sym)
+                b[i][j] = 0
+                if move_val > best_val:
+                    best_val = move_val
+                    best_move = (i, j)
+    return best_move
 
-# ---------------------------
-# Robot pick and place sequence
-# ---------------------------
-def pick_block_from_supply(supply_pos):
-    # supply_pos: (x,y,z_approach)
-    x_approach, y_approach, z_app = supply_pos
-    # Move above supply
-    dob_move_abs(x_approach, y_approach, Z_SAFE)
-    dob_move_abs(x_approach, y_approach, z_app)
-    dob_move_abs(x_approach, y_approach, Z_PICK)
-    gripper_close()
-    dob_move_abs(x_approach, y_approach, Z_SAFE)
+# Dobot movement to pick and place blocks
+def pick_and_place_block(source, dest):
+    global red_current_source_z, yellow_current_source_z
+    sx, sy, _ = source
+    dx, dy, dz = dest
 
-def place_block_at(x, y):
-    # move to approach over (x,y)
-    dob_move_abs(x, y, Z_SAFE)
-    dob_move_abs(x, y, Z_APPROACH)
-    dob_move_abs(x, y, Z_PLACE)  # lower to place
-    gripper_open()
-    dob_move_abs(x, y, Z_SAFE)
+    if source == source_position_red:
+        current_source_z = red_current_source_z
+    else:
+        current_source_z = yellow_current_source_z
 
-def pick_and_place_from_supply(supply_pos, dest_xy):
-    pick_block_from_supply(supply_pos)
-    # dest_xy is tuple X,Y in mm; travel low then release
-    dx, dy = dest_xy
-    place_block_at(dx, dy)
+    Dobot.move_to(*home_position)
+    time.sleep(2)
 
-# ---------------------------
-# Main flow
-# ---------------------------
-def main():
-    print("Starting Tic-Tac-Toe Dobot Controller")
-    cap = cv2.VideoCapture(CAM_INDEX)  # or CAM_INDEX
-    if not cap.isOpened():
-        print("Failed to open camera index", CAM_INDEX)
-        return
+    Dobot.move_to(sx, sy, current_source_z + 30)
+    Dobot.move_to(sx, sy, current_source_z)
+    Dobot.suck(True)
+    time.sleep(2)
 
-    # Get initial frame for calibration
+    Dobot.move_to(sx, sy, current_source_z + 30)
+    Dobot.move_to(*home_position)
+    time.sleep(2)
+
+    Dobot.move_to(dx, dy, dz+50)
+    time.sleep(1)
+    Dobot.move_to(dx, dy, dz)
+    Dobot.suck(False)
+    Dobot.move_to(*home_position)
+    time.sleep(2)
+
+    if source == source_position_red:
+        red_current_source_z -= 10       # Reducing the source stack's height by 10mm to make it autonomous
+    else:
+        yellow_current_source_z -= 10
+    time.sleep(1)
+    print(f" Robot placed at {dest}")
+
+# Color detection
+def detect_colors(frame):
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    lower_red1, upper_red1 = np.array([0, 120, 70]), np.array([10, 255, 255])
+    lower_red2, upper_red2 = np.array([170, 120, 70]), np.array([180, 255, 255])
+    mask_red = cv2.inRange(hsv, lower_red1, upper_red1) + cv2.inRange(
+        hsv, lower_red2, upper_red2
+    )
+    lower_yellow, upper_yellow = np.array([20, 100, 100]), np.array([35, 255, 255])
+    mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
+
+    red, yellow = [], []
+    for mask, centers in [(mask_red, red), (mask_yellow, yellow)]:
+        contours, _ = cv2.findContours(
+            mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+        for c in contours:
+            if cv2.contourArea(c) > 300:
+                x, y, w, h = cv2.boundingRect(c)
+                centers.append((x + w // 2, y + h // 2))
+    return red, yellow
+
+# Pixel to grid
+def pixel_to_grid(cx, cy):
+    row, col = -1, -1
+    for i in range(3):
+        if grid_x[i] <= cx < grid_x[i + 1]:
+            col = i
+        if grid_y[i] <= cy < grid_y[i + 1]:
+            row = i
+    if row == -1 or col == -1:
+        return (-1, -1)
+    return row, col
+
+# Game setup
+choice = input("Who plays first? (human/robot): ").strip().lower()
+if choice not in ["human", "robot"]:
+    choice = "human"
+
+while True:
+    color_choice = input("Choose your color (red/yellow): ").strip().lower()
+    if color_choice in ["red", "yellow"]:
+        break
+    print("Invalid choice! Please enter either 'red' or 'yellow'.")
+
+if color_choice == "red":
+    human_symbol = 1
+    robot_symbol = 2
+    human_source = source_position_red
+    robot_source = source_position_yellow
+else:
+    human_symbol = 2
+    robot_symbol = 1
+    human_source = source_position_yellow
+    robot_source = source_position_red
+
+player_turn = True if choice == "human" else False
+robot_has_played = False
+
+previous_human_blocks = set()
+previous_all_blocks = set()
+pending_human_move = None
+stable_frames = 0
+required_stability = 3
+wrong_pending = None
+wrong_stable = 0
+wrong_required = 3
+
+print(f"\nStarting Tic Tac Toe...")
+print(f"You are playing as {'RED' if human_symbol == 1 else 'YELLOW'}.")
+print(f"{'You' if player_turn else 'Robot'} will play first.\n")
+Dobot.move_to(*home_position)
+
+for _ in range(10):
     ret, frame = cap.read()
     if not ret:
-        print("Camera read failed.")
-        return
+        continue
 
-    # Step 1: calibration - get pixel corners of pallet
-    window_name = "Calibration - Click 4 pallet corners (press 'c' to confirm)"
-    pixel_corners = click_points_for_corners(window_name, frame, 4)
-    cv2.destroyWindow(window_name)
+    #Draw the grid and coordinate labels
+    for x in grid_x:
+        cv2.line(frame, (x, y_min), (x, y_max), (255, 255, 255), 1)
+    for y in grid_y:
+        cv2.line(frame, (x_min, y), (x_max, y), (255, 255, 255), 1)
 
-    if len(pixel_corners) < 4:
-        print("Calibration aborted.")
-        return
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    for i in range(3):
+        for j in range(3):
+            cx = int((grid_x[j] + grid_x[j + 1]) / 2)
+            cy = int((grid_y[i] + grid_y[i + 1]) / 2)
+            cv2.putText(frame, f"({i},{j})", (cx - 25, cy + 5), font, 0.5, (255, 255, 255), 1)
 
-    # Step 2: ask user to provide real-world coordinates (mm) for those four corners
-    print("You clicked 4 pixel corners. Now enter corresponding real-world XY (in mm) for each corner in the SAME ORDER.")
-    real_corners = []
-    for i, p in enumerate(pixel_corners):
-        print(f"Corner {i+1} pixel {p}: enter X Y in mm (e.g. 100 200): ")
-        # For convenience, we can ask user to type values
-        vals = input(f"Corner {i+1} X Y: ")
-        try:
-            X, Y = [float(x) for x in vals.strip().split()]
-        except:
-            print("Invalid input; using 0,0. Please restart and enter correct coordinates.")
-            return
-        real_corners.append((X, Y))
+    # Display the prepared frame
+    cv2.imshow("Tic Tac Toe", frame)
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
 
-    # compute homography mapping pixels -> real-world XY
-    H = compute_homography(pixel_corners, real_corners)
-    if H is None:
-        print("Homography failed.")
-        return
+print("Camera ready. Starting game...\n")
 
-    # From real_corners we can derive grid origin and cell size if the corners were the outer corners of the grid.
-    # User should supply corners of outermost pallet rectangle:
-    # We'll compute bounding box and divide into 3x3 for the pallet grid.
-    xs = [c[0] for c in real_corners]
-    ys = [c[1] for c in real_corners]
-    minx, maxx = min(xs), max(xs)
-    miny, maxy = min(ys), max(ys)
-    grid_origin = (minx, miny)  # top-left
-    cell_w = (maxx - minx) / 3.0
-    cell_h = (maxy - miny) / 3.0
-    cell_size = (cell_w, cell_h)
-    print("Grid origin:", grid_origin, "cell size (mm):", cell_size)
+# Main loop
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        break
 
-    # Initialize game state: None = empty, "X" = human (red), "O" = robot (blue)
-    board = [None] * 9
-    last_seen_cells = [None] * 9  # memorize last seen occupant to detect change events
+    red, yellow = detect_colors(frame)
+    red_cells, yellow_cells = set(), set()
+    for x, y in red:
+        rc = pixel_to_grid(x, y)
+        if rc != (-1, -1):
+            red_cells.add(rc)
+    for x, y in yellow:
+        rc = pixel_to_grid(x, y)
+        if rc != (-1, -1):
+            yellow_cells.add(rc)
 
-    print("Calibration complete. Starting main loop. Press 'q' in the camera window to quit.")
-    time.sleep(1.0)
+    for x in grid_x:
+        cv2.line(frame, (x, y_min), (x, y_max), (255, 255, 255), 1)
+    for y in grid_y:
+        cv2.line(frame, (x_min, y), (x_max, y), (255, 255, 255), 1)
 
-    # Main loop
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            print("Frame read failed.")
-            break
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    for i in range(3):
+        for j in range(3):
+            cx = int((grid_x[j] + grid_x[j + 1]) / 2)
+            cy = int((grid_y[i] + grid_y[i + 1]) / 2)
+            cv2.putText(
+                frame, f"({i},{j})", (cx - 25, cy + 5), font, 0.5, (255, 255, 255), 1
+            )
 
-        red_centers, blue_centers, red_mask, blue_mask = detect_color_centroids(frame)
+    current_human = red_cells if human_symbol == 1 else yellow_cells
+    current_robot = yellow_cells if robot_symbol == 2 else red_cells
+    current_all = red_cells | yellow_cells
+    new_cells = current_all - previous_all_blocks
 
-        # visualize detections and compute pixel->world mapping
-        display = frame.copy()
-        for (c, _, cnt) in red_centers:
-            cv2.circle(display, c, 6, (0,0,255), -1)
-        for (c, _, cnt) in blue_centers:
-            cv2.circle(display, c, 6, (255,0,0), -1)
+    # Human Turn
+    if player_turn:
+        if len(new_cells) == 0:
+            pending_human_move = None
+            stable_frames = 0
+            wrong_pending = None
+            wrong_stable = 0
 
-        # map centroid pixels to world coords and to grid cells
-        detected_cells_state = [None] * 9
-        # process red
-        for (px,py), area, cnt in red_centers:
-            wx, wy = pixel_to_world(H, px, py)
-            idx = grid_index_from_world(wx, wy, grid_origin, cell_size)
-            if idx is not None:
-                detected_cells_state[idx] = "X"
-                cv2.putText(display, "R", (px+5,py+5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,255),1)
-        # process blue
-        for (px,py), area, cnt in blue_centers:
-            wx, wy = pixel_to_world(H, px, py)
-            idx = grid_index_from_world(wx, wy, grid_origin, cell_size)
-            if idx is not None:
-                detected_cells_state[idx] = "O"
-                cv2.putText(display, "B", (px+5,py+5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,0,0),1)
+        # Edge Case 1
+        elif len(new_cells) > 1:
+            print("Multiple new blocks detected! Only one move allowed.")      
+            time.sleep(1)
+            continue
 
-        # Show grid overlay for visualization
-        for r in range(4):
-            # horizontal lines in pixels: map world grid lines back to pixels may require inverse homography
-            # We'll simply draw approximate cell boundaries by mapping world grid boundary points to pixels via inverse H
-            pass  # keep simple; rely on user calibration
+        else:
+            (row, col) = list(new_cells)[0]
 
-        cv2.imshow("Dobot TicTacToe", display)
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord('q'):
-            print("Quitting.")
-            break
+            # Determine correct color
+            if human_symbol == 1:
+                expected_cells = red_cells
+                color_name = "RED"
+            else:
+                expected_cells = yellow_cells
+                color_name = "YELLOW"
 
-        # detect new human moves by comparing detected_cells_state to last_seen_cells
-        for idx in range(9):
-            prev = last_seen_cells[idx]
-            now = detected_cells_state[idx]
-            if prev != now:
-                # update last_seen immediately to avoid repeated triggers
-                last_seen_cells[idx] = now
-
-        # Update board from detected state
-        # Only accept a human move if previously the cell was empty (None) and now contains "X"
-        # This helps avoid reacting to partial occlusions.
-        # Detect transitions: empty -> X
-        for idx in range(9):
-            if board[idx] is None and detected_cells_state[idx] == "X":
-                # new human move found
-                board[idx] = "X"
-                print(f"Human moved to cell {idx}")
-                # after human move, check win/draw
-                w = check_winner(board)
-                if w:
-                    print("Game ended after human move. Winner:", w)
-                    # you might want to handle reset here (not implemented)
+            # Wrong color case (Edge Case 2)
+            if (row, col) not in expected_cells:
+                if wrong_pending == (row, col):
+                    wrong_stable += 1
                 else:
-                    # AI turn
-                    ai_move = ai_choose_move(board, ai_player="O", hu_player="X")
-                    if ai_move is None:
-                        print("No move for AI (draw?)")
-                    else:
-                        print("AI chooses", ai_move)
-                        # compute world coordinate for AI placement
-                        wx, wy = world_coord_for_cell(grid_origin, cell_size, ai_move)
-                        # pick a blue block from supply then place it
-                        pick_and_place_from_supply(BLUE_SUPPLY_POS, (wx, wy))
-                        # update board
-                        board[ai_move] = "O"
-                        # small wait and then continue
-                        time.sleep(0.5)
-                # break to debounce multiple human placements detected same frame
-                break
+                    wrong_pending = (row, col)
+                    wrong_stable = 1
 
-    cap.release()
-    cv2.destroyAllWindows()
-    # optionally close dobot connection
-    if dobot is not None:
-        try:
-            dobot.close()
-        except:
-            pass
-    print("Program ended.")
+                if wrong_stable >= wrong_required:
+                    print(
+                        f" Wrong color block used! You are playing {color_name}. "
+                        f"Please remove the piece at ({row},{col})."
+                    )
+                    wrong_stable = 0
+                continue
 
-if __name__ == "__main__":
-    main()
+            # Stability check for correct move
+            if pending_human_move == (row, col):
+                stable_frames += 1
+            else:
+                pending_human_move = (row, col)
+                stable_frames = 1
+            if stable_frames < required_stability:
+                continue
+
+            if board[row][col] == 0:
+                board[row][col] = human_symbol
+                previous_human_blocks = current_human
+                previous_all_blocks = current_all
+                player_turn = False
+                robot_has_played = False
+                pending_human_move = None
+                stable_frames = 0
+                wrong_pending = None
+                wrong_stable = 0
+                print(f"Human placed at ({row},{col})")
+
+                winner = check_winner(board)
+                if winner != 0:
+                    print(" Human wins!" if winner == human_symbol else " Robot wins!")
+                    cv2.putText(
+                        frame,
+                        f"{'Human' if winner == human_symbol else 'Robot'} wins!",
+                        (60, 60),
+                        font,
+                        1,
+                        (0, 255, 0),
+                        2,
+                    )
+                    cv2.imshow("Tic Tac Toe", frame)
+                    cv2.waitKey(3000)
+                    break
+                elif not is_moves_left(board):
+                    print("It's a draw!")
+                    cv2.putText(
+                        frame,
+                        "Draw!",
+                        (150, 60),
+                        font,
+                        1,
+                        (0, 255, 255),
+                        2,
+                    )
+                    cv2.imshow("Tic Tac Toe", frame)
+                    cv2.waitKey(3000)
+                    break
+            else:
+                print(" Cell already occupied!")
+
+    # Robot Turn
+    elif not player_turn and not robot_has_played:
+        print("🤖 Robot's turn...")
+        row, col = find_best_move(board, robot_symbol, human_symbol)
+        if row != -1 and col != -1:
+            print(f" Robot plays at ({row},{col})")
+            pick_and_place_block(robot_source, grid_positions[row][col])
+            board[row][col] = robot_symbol
+            previous_all_blocks = previous_all_blocks | {(row, col)}
+        robot_has_played = True
+        player_turn = True
+
+        winner = check_winner(board)
+        if winner != 0:
+            print(" Human wins!" if winner == human_symbol else " Robot wins!")
+            cv2.putText(
+                frame,
+                f"{'Human' if winner == human_symbol else 'Robot'} wins!",
+                (60, 60),
+                font,
+                1,
+                (0, 255, 0),
+                2,
+            )
+            cv2.imshow("Tic Tac Toe", frame)
+            cv2.waitKey(3000)
+            break
+        elif not is_moves_left(board):
+            print("It's a draw!")
+            cv2.putText(frame, "Draw!", (150, 60), font, 1, (0, 255, 255), 2)
+            cv2.imshow("Tic Tac Toe", frame)
+            cv2.waitKey(3000)
+            break
+
+    # Show frame
+    cv2.imshow("Tic Tac Toe", frame)
+    if cv2.waitKey(1) & 0xFF == ord("q"):
+        break
+
+cap.release()
+cv2.destroyAllWindows()
+Dobot.close()

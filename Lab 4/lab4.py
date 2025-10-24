@@ -4,7 +4,7 @@ import numpy as np
 from pydobot import Dobot
 from ht import forward_kinematics, inverse_kinematics
 
-robot = Dobot(port="/dev/ttyACM0")   # update port if necessary
+robot = Dobot(port="/dev/ttyACM0") 
 time.sleep(2)
 
 # Robot link dimensions (in mm)
@@ -41,7 +41,7 @@ for i, (j1, j2, j3) in enumerate(joint_tests, 1):
     # Forward kinematics calculation
     px, py, pz = forward_kinematics(t1, t2, t3, a1, a2, a3)
 
-    print(f"Given Joint Angles (°): [{j1}, {j2}, {j3}]")
+    print(f"Given Joint Angles: [{j1}, {j2}, {j3}]")
     print(f"Computed Position (mm): ({px:.3f}, {py:.3f}, {pz:.3f})")
 
     # Move robot using joint mode
@@ -54,13 +54,13 @@ for i, (j1, j2, j3) in enumerate(joint_tests, 1):
     rj1, rj2, rj3, rj4 = joints
 
     print(f"Robot Feedback Position (mm): ({rx:.2f}, {ry:.2f}, {rz:.2f})")
-    print(f"Robot Joint Angles (°): ({rj1:.2f}, {rj2:.2f}, {rj3:.2f}, {rj4:.2f})")
+    print(f"Robot Joint Angles : ({rj1:.2f}, {rj2:.2f}, {rj3:.2f}, {rj4:.2f})")
 
     # Inverse kinematics test using robot feedback
     sol = inverse_kinematics(rx, ry, rz)
     th1, th2, th3 = np.rad2deg(sol)
 
-    print(f"Inverse Kinematics Solution (°): ({th1:.3f}, {th2:.3f}, {th3:.3f})")
+    print(f"Inverse Kinematics Solution : ({th1:.3f}, {th2:.3f}, {th3:.3f})")
 
     # Compare with measured joint values
     err = np.sqrt((rj1 - th1)**2 + (rj2 - th2)**2 + (rj3 - th3)**2)
@@ -87,12 +87,12 @@ for i, (px, py, pz) in enumerate(position_tests, 1):
     rj1, rj2, rj3, rj4 = joints
 
     print(f"Robot Feedback Position (mm): ({rx:.3f}, {ry:.3f}, {rz:.3f})")
-    print(f"Joint Angles (°): ({rj1:.2f}, {rj2:.2f}, {rj3:.2f}, {rj4:.2f})")
+    print(f"Joint Angles : ({rj1:.2f}, {rj2:.2f}, {rj3:.2f}, {rj4:.2f})")
 
     # Inverse kinematics from measured position
     sol = inverse_kinematics(rx, ry, rz)
     th1, th2, th3 = np.rad2deg(sol)
-    print(f"Inverse Kinematics (°): ({th1:.3f}, {th2:.3f}, {th3:.3f})")
+    print(f"Inverse Kinematics : ({th1:.3f}, {th2:.3f}, {th3:.3f})")
 
     # Compute angular error
     err = np.sqrt((rj1 - th1)**2 + (rj2 - th2)**2 + (rj3 - th3)**2)

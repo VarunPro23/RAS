@@ -6,10 +6,8 @@ from pydobot import Dobot
 # ==============================================================
 # 1️⃣ CAMERA INITIALIZATION
 # ==============================================================
-def initialize_camera(camera_id=0):
-    cap = cv2.VideoCapture(camera_id)
-    if not cap.isOpened():
-        raise IOError("❌ Cannot open camera.")
+def initialize_camera():
+    cap = cv2.VideoCapture('/dev/video2') 
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
     print("✅ Camera initialized.")

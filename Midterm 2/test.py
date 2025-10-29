@@ -7,9 +7,9 @@ from pydobot import Dobot
 # 1️⃣ CAMERA INITIALIZATION
 # ==============================================================
 def initialize_camera():
-    cap = cv2.VideoCapture('/dev/video2') 
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+    cap = cv2.VideoCapture('/dev/video0') 
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     print("✅ Camera initialized.")
     return cap
 
@@ -140,10 +140,10 @@ def move_dobot_along_path(dobot, path, maze_img, M):
 def main():
     # --- Known robot coordinates for each ArUco marker (mm) ---
     robot_points_dict = {
-        0: [220, 200],  # top-left
-        1: [280, 200],  # top-right
-        2: [220, 140],  # bottom-left
-        3: [280, 140]   # bottom-right
+        0: [192, -118],  # top-left
+        1: [206, 64],  # top-right
+        2: [348, 48],  # bottom-left
+        3: [338, -124]   # bottom-right
     }
 
     # --- Step 1: Initialize camera ---

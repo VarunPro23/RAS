@@ -3,11 +3,11 @@ import numpy as np
 
 def initialize_camera():
     """Initialize camera as in the Tic-Tac-Toe project."""
-    cap = cv2.VideoCapture('/dev/video2') 
+    cap = cv2.VideoCapture('/dev/video0') 
     if not cap.isOpened():
         raise IOError("❌ Cannot open camera. Check connection.")
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     print("✅ Camera initialized.")
     return cap
 

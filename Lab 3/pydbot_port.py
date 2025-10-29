@@ -40,8 +40,6 @@
 # else:
 #     print("Could not connect to Dobot")
 
-dt-mgl-4r002-01e - dobot model number
-
 
 
 

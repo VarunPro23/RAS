@@ -25,10 +25,11 @@ DOBOT_PORT = "/dev/ttyACM0"
 FRAME_W, FRAME_H = 640, 480
 img_pts = np.array([[0, 0], [FRAME_W, 0], [FRAME_W, FRAME_H], [0, FRAME_H]], dtype=np.float32)
 world_pts = np.array([
-    [192, -118],   # img (0,   0)
-    [206, 64],   # img (640, 0)
-    [348, 48],    # img (640, 480)
-    [338, -124],  # img (0,   480)
+    [211, -113],   # img (0,   0)
+    [211, 51],   # img (640, 0)
+    [360, 49],  # img (0,   480)
+    [348, -110],    # img (640, 480)
+    
 ], dtype=np.float32)
 H, _ = cv2.findHomography(img_pts, world_pts)
 HINV = np.linalg.inv(H)

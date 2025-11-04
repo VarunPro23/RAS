@@ -1,4 +1,5 @@
 import cv2
+import time
 import numpy as np
 
 def initialize_camera():
@@ -54,8 +55,12 @@ def main():
 
         if maze_found:
             print("🟢 Maze detected!")
+            # time.sleep(30)
+            # break
         else:
             print("🔴 No maze detected.")
+            # time.sleep(30)
+            # break
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
